@@ -1,0 +1,71 @@
+trigger:
+- master
+
+
+stages:
+- stage: Build
+  jobs:
+    - job: Build
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+      - task: Gradle@2
+        displayName: Building Gradle WAR 
+        inputs:
+          workingDirectory: ''
+          gradleWrapperFile: 'gradlew'
+          gradleOptions: '-Xmx3072m'
+          javaHomeOption: 'JDKVersion'
+          jdkVersionOption: '1.8'
+          jdkArchitectureOption: 'x64'
+          tasks: 'build'
+
+      - task: CopyFiles@2
+        displayName: Copying WAR to Artifact Staging Directory
+        inputs:
+          SourceFolder: 'build/libs/'
+          Contents: '**/*.war'
+          TargetFolder: '$(Build.ArtifactStagingDirectory)' 
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'
+
+      - task: ArtifactoryGenericUpload@2
+        inputs:
+          artifactoryService: 'Jfrog'
+          specSource: 'taskConfiguration'
+          fileSpec: |
+            {
+              "files": [
+                {
+                  "pattern": "$(Build.ArtifactStagingDirectory)/",
+                  "target": "nuget-local/freshupload/"
+                }
+              ]
+            }
+          failNoOp: true
+
+- stage: Deploy
+  jobs:
+    - job: Deploy
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - task: DownloadBuildArtifacts@0
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: 'drop'
+            itemPattern: '**/*.war'
+            downloadPath: '$(System.ArtifactsDirectory)'
+        - task: AzureRmWebAppDeployment@4
+          inputs:
+            ConnectionType: 'AzureRM'
+            azureSubscription: 'Free Trial(3d518d21-8f76-4b60-82da-780880fbbf2f)'
+            appType: 'webAppLinux'
+            WebAppName: 'mljcodeapp'
+            packageForLinux: '$(System.ArtifactsDirectory)/**/*.war'
+            RuntimeStack: 'TOMCAT|8.5-java11'
